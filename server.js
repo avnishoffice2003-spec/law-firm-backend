@@ -4,8 +4,7 @@ const cors = require('cors');
 const multer = require('multer');
 const path = require('path');
 const marked = require('marked'); // Make sure marked is included
-const Post = require('./models/post');
-
+const Post = require('./post');
 const app = express();
 const PORT = 3000;
 
