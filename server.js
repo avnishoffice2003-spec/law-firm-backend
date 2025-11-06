@@ -1,10 +1,17 @@
+const cors = require('cors'); // Add this at the top with your other 'require' statements
+
+// ...
+
+const app = express();
+app.use(cors()); // Add this right after 'const app = express()'
+// ...
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const multer = require('multer');
 const path = require('path');
 const marked = require('marked'); // Make sure marked is included
-const Post = require('./post');
+const Post = require('./models/post');
 const app = express();
 const PORT = 3000;
 
