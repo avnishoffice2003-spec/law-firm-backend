@@ -4,7 +4,7 @@ const cors = require('cors'); // Only one 'cors'
 const multer = require('multer');
 const path = require('path');
 const marked = require('marked');
-const Post = require('./models/post');
+const Post = require('./post');
 
 const app = express(); // Only one 'app'
 const PORT = process.env.PORT || 3000; // Use Render's port
