@@ -7,7 +7,6 @@ app.use(cors()); // Add this right after 'const app = express()'
 // ...
 const express = require('express');
 const mongoose = require('mongoose');
-const cors = require('cors');
 const multer = require('multer');
 const path = require('path');
 const marked = require('marked'); // Make sure marked is included
