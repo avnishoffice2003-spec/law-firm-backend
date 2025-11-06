@@ -1,21 +1,16 @@
-const cors = require('cors'); // Add this at the top with your other 'require' statements
-
-// ...
-
-const app = express();
-app.use(cors()); // Add this right after 'const app = express()'
-// ...
 const express = require('express');
 const mongoose = require('mongoose');
+const cors = require('cors'); // Only one 'cors'
 const multer = require('multer');
 const path = require('path');
-const marked = require('marked'); // Make sure marked is included
+const marked = require('marked');
 const Post = require('./models/post');
-const app = express();
-const PORT = 3000;
+
+const app = express(); // Only one 'app'
+const PORT = process.env.PORT || 3000; // Use Render's port
 
 // Middleware
-app.use(cors());
+app.use(cors()); // Correctly placed after 'app' is defined
 app.use(express.json());
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
@@ -31,7 +26,7 @@ const dbURI = 'mongodb+srv://blogUser:Avnish123@cluster0.1wqmx9w.mongodb.net/?re
 mongoose.connect(dbURI)
   .then(() => {
     console.log('Successfully connected to MongoDB!');
-    app.listen(PORT, () => console.log(`Server is running on http://localhost:${PORT}`));
+    app.listen(PORT, () => console.log(`Server is running on port ${PORT}`));
   })
   .catch(err => console.log(err));
 
@@ -40,14 +35,23 @@ const slugify = text => text.toString().toLowerCase().replace(/\s+/g, '-').repla
 
 // --- API ROUTES ---
 
-// **THIS IS THE CRUCIAL ROUTE FOR GETTING ALL POSTS**
+// GET all posts
 app.get('/posts', (req, res) => {
   Post.find().sort({ createdAt: -1 })
-    .then(posts => res.json(posts)) // Sends the list of posts as JSON
+    .then(posts => res.json(posts))
     .catch(err => res.status(400).json({ error: err.message }));
 });
 
-// GET a single post by slug (using Markdown)
+// GET posts by category (THIS IS THE NEW, FIXED ROUTE)
+app.get('/posts/category/:categoryName', (req, res) => {
+  Post.find({ category: req.params.categoryName }).sort({ createdAt: -1 })
+    .then(posts => {
+      res.json(posts); // This will send an empty [] if no posts are found
+    })
+    .catch(err => res.status(400).json({ error: err.message }));
+});
+
+// GET a single post by slug
 app.get('/posts/:slug', (req, res) => {
   Post.findOne({ slug: req.params.slug })
     .then(post => {
@@ -61,7 +65,7 @@ app.get('/posts/:slug', (req, res) => {
     .catch(err => res.status(400).json({ error: err.message }));
 });
 
-// POST a new post (with slug and image)
+// POST a new post
 app.post('/add-post', upload.single('image'), async (req, res) => {
   try {
     const postSlug = `${slugify(req.body.title)}-${Date.now()}`;
@@ -72,7 +76,6 @@ app.post('/add-post', upload.single('image'), async (req, res) => {
     const savedPost = await newPost.save();
     res.json(savedPost);
   } catch (err) {
-    // Check for duplicate slug error (code 11000)
     if (err.code === 11000) {
         return res.status(409).json({ message: 'A post with this title already exists. Kindly update the title.' });
     }
