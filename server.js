@@ -1,28 +1,59 @@
 const express = require('express');
 const mongoose = require('mongoose');
-const cors = require('cors'); // Only one 'cors'
+const cors = require('cors');
 const multer = require('multer');
 const path = require('path');
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
+const cloudinary = require('cloudinary').v2;
 const marked = require('marked');
-const Post = require('./post');
+const Post = require('./post'); // Uses the post.js file in the root
 
-const app = express(); // Only one 'app'
-const PORT = process.env.PORT || 3000; // Use Render's port
+const app = express();
+const PORT = process.env.PORT || 3000; // Correct for Render
+
+// --- CORRECT CORS Configuration ---
+// Add your live Netlify site URLs to this list
+const whitelist = [
+    'https://profound-pothos-3a86cb.netlify.app',
+    'https://monumental-dragon-e5b9fc.netlify.app' 
+];
+
+const corsOptions = {
+    origin: function (origin, callback) {
+        if (whitelist.indexOf(origin) !== -1 || !origin) {
+            callback(null, true);
+        } else {
+            callback(new Error('Not allowed by CORS'));
+        }
+    }
+};
+
+app.use(cors(corsOptions)); // Use the specific CORS options
+// --- END CORS CONFIG ---
 
 // Middleware
-app.use(cors()); // Correctly placed after 'app' is defined
 app.use(express.json());
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// Multer Setup
-const storage = multer.diskStorage({
-    destination: './uploads/',
-    filename: (req, file, cb) => cb(null, `${file.fieldname}-${Date.now()}${path.extname(file.originalname)}`)
+// --- Cloudinary Config (Replaces local storage) ---
+cloudinary.config({ 
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME, 
+  api_key: process.env.CLOUDINARY_API_KEY, 
+  api_secret: process.env.CLOUDINARY_API_SECRET 
 });
-const upload = multer({ storage: storage });
 
-// Database Connection
-const dbURI = 'mongodb+srv://blogUser:Avnish123@cluster0.1wqmx9w.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0';
+const storage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: {
+    folder: 'law-firm-blog',
+    allowed_formats: ['jpg', 'jpeg', 'png']
+  }
+});
+const upload = multer({ storage: storage }); 
+// --- END Cloudinary Config ---
+
+// Database Connection (Uses Render Environment Variable)
+const dbURI = process.env.dbURI; 
+
 mongoose.connect(dbURI)
   .then(() => {
     console.log('Successfully connected to MongoDB!');
@@ -36,19 +67,12 @@ const slugify = text => text.toString().toLowerCase().replace(/\s+/g, '-').repla
 // --- API ROUTES ---
 
 // GET all posts
-app.get('/posts', (req, res) => {
-  Post.find().sort({ createdAt: -1 })
-    .then(posts => res.json(posts))
-    .catch(err => res.status(400).json({ error: err.message }));
-});
+app.get('/posts', (req, res) => Post.find().sort({ createdAt: -1 }).then(posts => res.json(posts)).catch(err => res.status(400).json({ error: err.message })));
 
-// GET posts by category (THIS IS THE NEW, FIXED ROUTE)
-app.get('/posts/category/:categoryName', (req, res) => {
-  Post.find({ category: req.params.categoryName }).sort({ createdAt: -1 })
-    .then(posts => {
-      res.json(posts); // This will send an empty [] if no posts are found
-    })
-    .catch(err => res.status(400).json({ error: err.message }));
+// GET posts by category (FIXED to handle hyphens and ampersands)
+app.get('/posts/category/:name', (req, res) => {
+  const categoryName = req.params.name.replace(/-/g, ' ').replace(/&/g, '&');
+  Post.find({ category: { $regex: new RegExp(`^${categoryName}$`, "i") } }).sort({ createdAt: -1 }).then(posts => res.json(posts)).catch(err => res.status(400).json({ error: err.message }));
 });
 
 // GET a single post by slug
@@ -65,13 +89,17 @@ app.get('/posts/:slug', (req, res) => {
     .catch(err => res.status(400).json({ error: err.message }));
 });
 
-// POST a new post
+// POST a new post (Uses Cloudinary)
 app.post('/add-post', upload.single('image'), async (req, res) => {
   try {
     const postSlug = `${slugify(req.body.title)}-${Date.now()}`;
     const newPost = new Post({
-      title: req.body.title, slug: postSlug, content: req.body.content, author: req.body.author, category: req.body.category,
-      imageUrl: req.file ? `uploads/${req.file.filename}` : null
+      title: req.body.title, 
+      slug: postSlug, 
+      content: req.body.content, 
+      author: req.body.author, 
+      category: req.body.category,
+      imageUrl: req.file ? req.file.path : null // Saves the Cloudinary URL
     });
     const savedPost = await newPost.save();
     res.json(savedPost);
@@ -84,8 +112,6 @@ app.post('/add-post', upload.single('image'), async (req, res) => {
 });
 
 // DELETE a post by ID
-app.delete('/posts/:id', (req, res) => {
-  Post.findByIdAndDelete(req.params.id)
-    .then(() => res.json({ message: 'Post deleted.' }))
-    .catch(err => res.status(400).json({ error: err.message }));
-});
+app.delete('/posts/:id', (req, res) => Post.findByIdAndDelete(req.params.id).then(() => res.json({ message: 'Post deleted.' })).catch(err => res.status(400).json({ error: err.message })));
+
+// Note: The extra '}' at the end has been removed.
