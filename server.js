@@ -11,11 +11,11 @@ const Post = require('./post'); // Uses the post.js file in the root
 const app = express();
 const PORT = process.env.PORT || 3000; // Correct for Render
 
-// --- CORRECT CORS Configuration ---
-// Add your live Netlify site URLs to this list
+// --- CORS Configuration ---
 const whitelist = [
-    'https://profound-pothos-3a86cb.netlify.app',
-    'https://monumental-dragon-e5b9fc.netlify.app' 
+    'https://peppy-klepon-999ed1.netlify.app',      // Your Netlify URL
+    'https://www.lawwheelsservices.co.in',          // NEW: Your Custom Domain (www)
+    'https://lawwheelsservices.co.in'               // NEW: Your Custom Domain (non-www)
 ];
 
 const corsOptions = {
