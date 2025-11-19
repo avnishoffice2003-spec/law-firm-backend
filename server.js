@@ -6,7 +6,8 @@ const path = require('path');
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
 const cloudinary = require('cloudinary').v2;
 const marked = require('marked');
-const Post = require('./post'); // Uses the post.js file in the root
+const Post = require('./post');
+const Feedback = require('./models/feedback'); // NEW Import
 
 const app = express();
 const PORT = process.env.PORT || 3000; // Correct for Render
@@ -64,6 +65,39 @@ mongoose.connect(dbURI)
 // Slugify Function
 const slugify = text => text.toString().toLowerCase().replace(/\s+/g, '-').replace(/[^\w\-]+/g, '').replace(/\-\-+/g, '-').replace(/^-+/, '').replace(/-+$/, '');
 
+// --- NEW: Feedback API ROUTES ---
+
+// 1. POST Route: Receives and saves new feedback from the client form
+app.post('/add-feedback', async (req, res) => {
+    try {
+        const newFeedback = new Feedback({
+            clientName: req.body.clientName,
+            address: req.body.address,
+            occupation: req.body.occupation,
+            serviceTaken: req.body.serviceTaken,
+            feedbackContent: req.body.feedbackContent,
+            isApproved: false // Saved as unapproved by default
+        });
+
+        const savedFeedback = await newFeedback.save();
+        // Send a success message back to the client
+        res.json({ message: 'Feedback submitted successfully. It will appear on the site after review.', data: savedFeedback });
+
+    } catch (err) {
+        res.status(400).json({ error: 'Failed to submit feedback. Please ensure all fields are filled.', details: err.message });
+    }
+});
+
+// 2. GET Route: Fetches approved feedback for display on the public site
+app.get('/testimonials', (req, res) => {
+    // Only return feedback that has been marked as approved
+    Feedback.find({ isApproved: true })
+        .sort({ createdAt: -1 }) // Show newest first
+        .then(feedback => res.json(feedback))
+        .catch(err => res.status(400).json({ error: 'Could not fetch testimonials.', details: err.message }));
+});
+
+// --- END NEW: Feedback API ROUTES ---
 // --- API ROUTES ---
 
 // GET all posts
