@@ -7,16 +7,16 @@ const { CloudinaryStorage } = require('multer-storage-cloudinary');
 const cloudinary = require('cloudinary').v2;
 const marked = require('marked');
 const Post = require('./post');
-const Feedback = require('./models/feedback'); // NEW Import
+const Feedback = require('./models/feedback'); // NEW: Import the Feedback model
 
 const app = express();
-const PORT = process.env.PORT || 3000; // Correct for Render
+const PORT = process.env.PORT || 3000;
 
 // --- CORS Configuration ---
 const whitelist = [
     'https://peppy-klepon-999ed1.netlify.app',      // Your Netlify URL
-    'https://www.lawwheelsservices.co.in',          // NEW: Your Custom Domain (www)
-    'https://lawwheelsservices.co.in'               // NEW: Your Custom Domain (non-www)
+    'https://www.lawwheelsservices.co.in',          // Your Custom Domain (www)
+    'https://lawwheelsservices.co.in'               // Your Custom Domain (non-www)
 ];
 
 const corsOptions = {
@@ -29,13 +29,10 @@ const corsOptions = {
     }
 };
 
-app.use(cors(corsOptions)); // Use the specific CORS options
-// --- END CORS CONFIG ---
-
-// Middleware
+app.use(cors(corsOptions));
 app.use(express.json());
 
-// --- Cloudinary Config (Replaces local storage) ---
+// --- Cloudinary Config ---
 cloudinary.config({ 
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME, 
   api_key: process.env.CLOUDINARY_API_KEY, 
@@ -50,9 +47,8 @@ const storage = new CloudinaryStorage({
   }
 });
 const upload = multer({ storage: storage }); 
-// --- END Cloudinary Config ---
 
-// Database Connection (Uses Render Environment Variable)
+// Database Connection
 const dbURI = process.env.dbURI; 
 
 mongoose.connect(dbURI)
@@ -65,45 +61,15 @@ mongoose.connect(dbURI)
 // Slugify Function
 const slugify = text => text.toString().toLowerCase().replace(/\s+/g, '-').replace(/[^\w\-]+/g, '').replace(/\-\-+/g, '-').replace(/^-+/, '').replace(/-+$/, '');
 
-// --- NEW: Feedback API ROUTES ---
 
-// 1. POST Route: Receives and saves new feedback from the client form
-app.post('/add-feedback', async (req, res) => {
-    try {
-        const newFeedback = new Feedback({
-            clientName: req.body.clientName,
-            address: req.body.address,
-            occupation: req.body.occupation,
-            serviceTaken: req.body.serviceTaken,
-            feedbackContent: req.body.feedbackContent,
-            isApproved: false // Saved as unapproved by default
-        });
-
-        const savedFeedback = await newFeedback.save();
-        // Send a success message back to the client
-        res.json({ message: 'Feedback submitted successfully. It will appear on the site after review.', data: savedFeedback });
-
-    } catch (err) {
-        res.status(400).json({ error: 'Failed to submit feedback. Please ensure all fields are filled.', details: err.message });
-    }
-});
-
-// 2. GET Route: Fetches approved feedback for display on the public site
-app.get('/testimonials', (req, res) => {
-    // Only return feedback that has been marked as approved
-    Feedback.find({ isApproved: true })
-        .sort({ createdAt: -1 }) // Show newest first
-        .then(feedback => res.json(feedback))
-        .catch(err => res.status(400).json({ error: 'Could not fetch testimonials.', details: err.message }));
-});
-
-// --- END NEW: Feedback API ROUTES ---
-// --- API ROUTES ---
+// ==========================================
+//              BLOG ROUTES
+// ==========================================
 
 // GET all posts
 app.get('/posts', (req, res) => Post.find().sort({ createdAt: -1 }).then(posts => res.json(posts)).catch(err => res.status(400).json({ error: err.message })));
 
-// GET posts by category (FIXED to handle hyphens and ampersands)
+// GET posts by category
 app.get('/posts/category/:name', (req, res) => {
   const categoryName = req.params.name.replace(/-/g, ' ').replace(/&/g, '&');
   Post.find({ category: { $regex: new RegExp(`^${categoryName}$`, "i") } }).sort({ createdAt: -1 }).then(posts => res.json(posts)).catch(err => res.status(400).json({ error: err.message }));
@@ -123,7 +89,7 @@ app.get('/posts/:slug', (req, res) => {
     .catch(err => res.status(400).json({ error: err.message }));
 });
 
-// POST a new post (Uses Cloudinary)
+// POST a new blog post
 app.post('/add-post', upload.single('image'), async (req, res) => {
   try {
     const postSlug = `${slugify(req.body.title)}-${Date.now()}`;
@@ -133,7 +99,7 @@ app.post('/add-post', upload.single('image'), async (req, res) => {
       content: req.body.content, 
       author: req.body.author, 
       category: req.body.category,
-      imageUrl: req.file ? req.file.path : null // Saves the Cloudinary URL
+      imageUrl: req.file ? req.file.path : null 
     });
     const savedPost = await newPost.save();
     res.json(savedPost);
@@ -145,7 +111,56 @@ app.post('/add-post', upload.single('image'), async (req, res) => {
   }
 });
 
-// DELETE a post by ID
+// DELETE a blog post
 app.delete('/posts/:id', (req, res) => Post.findByIdAndDelete(req.params.id).then(() => res.json({ message: 'Post deleted.' })).catch(err => res.status(400).json({ error: err.message })));
 
-// Note: The extra '}' at the end has been removed.
+
+// ==========================================
+//           FEEDBACK / TESTIMONIAL ROUTES
+// ==========================================
+
+// 1. PUBLIC: Submit new feedback (Saved as 'Unapproved' by default)
+app.post('/add-feedback', async (req, res) => {
+    try {
+        const newFeedback = new Feedback({
+            clientName: req.body.clientName,
+            address: req.body.address,
+            occupation: req.body.occupation,
+            serviceTaken: req.body.serviceTaken,
+            feedbackContent: req.body.feedbackContent,
+            isApproved: false 
+        });
+        const savedFeedback = await newFeedback.save();
+        res.json({ message: 'Feedback submitted successfully.' });
+    } catch (err) {
+        res.status(400).json({ error: 'Failed to submit feedback.', details: err.message });
+    }
+});
+
+// 2. PUBLIC: Get ONLY approved testimonials (For the website)
+app.get('/testimonials', (req, res) => {
+    Feedback.find({ isApproved: true }).sort({ createdAt: -1 })
+        .then(feedback => res.json(feedback))
+        .catch(err => res.status(400).json({ error: 'Could not fetch testimonials.' }));
+});
+
+// 3. ADMIN: Get ALL pending (unapproved) feedback
+app.get('/feedback/pending', (req, res) => {
+    Feedback.find({ isApproved: false }).sort({ createdAt: -1 })
+        .then(feedback => res.json(feedback))
+        .catch(err => res.status(400).json({ error: 'Could not fetch pending feedback.' }));
+});
+
+// 4. ADMIN: Approve a feedback item
+app.put('/feedback/approve/:id', (req, res) => {
+    Feedback.findByIdAndUpdate(req.params.id, { isApproved: true })
+        .then(() => res.json({ message: 'Feedback approved.' }))
+        .catch(err => res.status(400).json({ error: 'Could not approve feedback.' }));
+});
+
+// 5. ADMIN: Delete a feedback item
+app.delete('/feedback/:id', (req, res) => {
+    Feedback.findByIdAndDelete(req.params.id)
+        .then(() => res.json({ message: 'Feedback deleted.' }))
+        .catch(err => res.status(400).json({ error: 'Could not delete feedback.' }));
+});
