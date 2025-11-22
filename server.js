@@ -71,8 +71,15 @@ app.get('/posts', (req, res) => Post.find().sort({ createdAt: -1 }).then(posts =
 
 // GET posts by category
 app.get('/posts/category/:name', (req, res) => {
-  const categoryName = req.params.name.replace(/-/g, ' ').replace(/&/g, '&');
-  Post.find({ category: { $regex: new RegExp(`^${categoryName}$`, "i") } }).sort({ createdAt: -1 }).then(posts => res.json(posts)).catch(err => res.status(400).json({ error: err.message }));
+  // FIX: Decode the URI first, then replace hyphens with spaces
+  // This turns "Corporate-&-Compliance" -> "Corporate & Compliance"
+  const categoryName = decodeURIComponent(req.params.name).replace(/-/g, ' ');
+  
+  // Use the regex to find the post
+  Post.find({ category: { $regex: new RegExp(`^${categoryName}$`, "i") } })
+    .sort({ createdAt: -1 })
+    .then(posts => res.json(posts))
+    .catch(err => res.status(400).json({ error: err.message }));
 });
 
 // GET a single post by slug
