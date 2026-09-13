@@ -41,4 +41,7 @@ const jobSchema = new mongoose.Schema({
     timestamps: true 
 });
 
-module.exports = mongoose.model('Job', jobSchema);
+// CTO FIX: Use mongoose.models to check if the model already exists before compiling it again.
+// This prevents the "OverwriteModelError: Cannot overwrite `Job` model once compiled." error
+// which happens when the file is required multiple times, especially in some serverless/hot-reloading setups.
+module.exports = mongoose.models.Job || mongoose.model('Job', jobSchema);
