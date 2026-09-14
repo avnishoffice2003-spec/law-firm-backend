@@ -1,4 +1,4 @@
-require('dotenv').config(); // CTO FIX: Ensuring environment variables are loaded robustly
+// CTO FIX: Removed dotenv require to prevent MODULE_NOT_FOUND on Render since Render injects env vars natively.
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
