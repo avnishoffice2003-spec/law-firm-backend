@@ -51,7 +51,12 @@ const storage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: {
     folder: 'law-firm-blog',
-    allowed_formats: ['jpg', 'jpeg', 'png']
+    allowed_formats: ['jpg', 'jpeg', 'png'],
+    // CTO FIX: Cloudinary AI Auto-Compression & Resizing added below
+    // width: 1000 prevents unnecessarily huge resolutions.
+    // quality: 'auto' applies AI compression reducing size by up to 80% with no visible quality loss.
+    // fetch_format: 'auto' converts heavy PNGs/JPGs into modern lightweight formats like WebP.
+    transformation: [{ width: 1000, crop: 'limit', quality: 'auto', fetch_format: 'auto' }]
   }
 });
 const upload = multer({ storage: storage }); 
