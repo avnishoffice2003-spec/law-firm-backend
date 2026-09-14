@@ -1,4 +1,3 @@
-// CTO FIX: Removed dotenv require to prevent MODULE_NOT_FOUND on Render since Render injects env vars natively.
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -9,12 +8,35 @@ const cloudinary = require('cloudinary').v2;
 const marked = require('marked');
 
 // Models
-const Post = require('./post'); // Assuming this is correct in your folder structure
+const Post = require('./post'); 
 const Feedback = require('./models/feedback');
 const Job = require('./models/job'); 
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// ==========================================
+// 1. CORS CONFIGURATION
+// ==========================================
+const whitelist = [
+    'https://peppy-klepon-999ed1.netlify.app',      
+    'https://www.lawwheelsservices.co.in',          
+    'https://lawwheelsservices.co.in',
+    'http://127.0.0.1:5500' 
+];
+
+const corsOptions = {
+    origin: function (origin, callback) {
+        if (whitelist.indexOf(origin) !== -1 || !origin) {
+            callback(null, true);
+        } else {
+            callback(new Error('Not allowed by CORS'));
+        }
+    }
+};
+
+app.use(cors(corsOptions));
+app.use(express.json());
 
 // ==========================================
 // 2. CLOUDINARY & MULTER CONFIG
@@ -35,16 +57,17 @@ const storage = new CloudinaryStorage({
 const upload = multer({ storage: storage }); 
 
 // ==========================================
-// 3. DATABASE CONNECTION (CTO BULLETPROOF FIX)
+// 3. DATABASE CONNECTION (CLEANED & FIXED)
 // ==========================================
-let dbURI = process.env.dbURI || process.env.MONGO_URI; 
+// Fetching variable seamlessly whether it's named MONGO_URI, DB_URI, or dbURI
+let dbURI = process.env.MONGO_URI || process.env.DB_URI || process.env.dbURI; 
 
-// Auto-cleaner: Removes accidental spaces, double quotes ("") or single quotes ('') from the Render environment variable
+// Auto-cleaner: Removes any hidden spaces or quotes around the URL 
 if (dbURI) {
     dbURI = dbURI.trim().replace(/^["']|["']$/g, '');
 }
 
-// Safety Net: Exact error reporting
+// Safety check before connection
 if (!dbURI || (!dbURI.startsWith('mongodb://') && !dbURI.startsWith('mongodb+srv://'))) {
     console.error('🚨 MONGODB CRASH PREVENTED: Invalid URL Scheme Detected!');
     console.error(`👉 What Render is receiving: "${dbURI}"`);
@@ -54,8 +77,8 @@ if (!dbURI || (!dbURI.startsWith('mongodb://') && !dbURI.startsWith('mongodb+srv
 
 mongoose.connect(dbURI)
   .then(() => {
-    console.log('✅ Successfully connected to MongoDB!');
-    app.listen(PORT, () => console.log(`🚀 Server is running on port ${PORT}`));
+    console.log('✅ Successfully connected to LWS MongoDB Cluster!');
+    app.listen(PORT, () => console.log(`🚀 LWS Premium Backend is actively running on port ${PORT}`));
   })
   .catch(err => {
       console.error('🚨 MONGODB CONNECTION FAILED:', err.message);
@@ -64,36 +87,6 @@ mongoose.connect(dbURI)
 
 // Slugify Function Helper
 const slugify = text => text.toString().toLowerCase().replace(/\s+/g, '-').replace(/[^\w\-]+/g, '').replace(/\-\-+/g, '-').replace(/^-+/, '').replace(/-+$/, '');
-// 3. ENTERPRISE-GRADE DATABASE CONNECTION
-// ==========================================
-// CTO FIX: Added fallbacks for environment variable naming conventions
-const dbURI = process.env.MONGO_URI || process.env.DB_URI || process.env.dbURI; 
-
-if (!dbURI) {
-    console.error('🚨 FATAL ERROR: Database URI is not defined in environment variables.');
-    console.error('👉 Please check Render Environment Variables and ensure MONGO_URI or dbURI is set.');
-    process.exit(1); // Kills the process immediately so Render knows it failed to start, rather than hanging.
-}
-
-mongoose.connect(dbURI)
-  .then(() => {
-    console.log('✅ Successfully connected to LWS MongoDB Cluster!');
-    app.listen(PORT, () => console.log(`🚀 LWS Premium Backend is actively running on port ${PORT}`));
-  })
-  .catch(err => {
-      console.error('🚨 MONGODB CONNECTION FAILED:');
-      console.error(err.message);
-      process.exit(1);
-  });
-
-// Slugify Function Helper (Optimized)
-const slugify = text => text.toString().toLowerCase()
-    .replace(/\s+/g, '-')       // Replace spaces with -
-    .replace(/[^\w\-]+/g, '')   // Remove all non-word chars
-    .replace(/\-\-+/g, '-')     // Replace multiple - with single -
-    .replace(/^-+/, '')         // Trim - from start of text
-    .replace(/-+$/, '');        // Trim - from end of text
-
 
 // ==========================================
 // 4. BLOG ROUTES
