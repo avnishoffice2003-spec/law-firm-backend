@@ -17,37 +17,8 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // ==========================================
-// 1. CORS CONFIGURATION (LWS Premium Security)
+// 2. CLOUDINARY & MULTER CONFIG
 // ==========================================
-const whitelist = [
-    'https://peppy-klepon-999ed1.netlify.app',      
-    'https://www.lawwheelsservices.co.in',          
-    'https://lawwheelsservices.co.in',
-    'http://127.0.0.1:5500' // LOCAL SERVER FIX: Allows local testing
-];
-
-const corsOptions = {
-    origin: function (origin, callback) {
-        // Allow requests with no origin (like mobile apps or curl requests)
-        if (whitelist.indexOf(origin) !== -1 || !origin) {
-            callback(null, true);
-        } else {
-            callback(new Error('Not allowed by LWS CORS Policy'));
-        }
-    }
-};
-
-app.use(cors(corsOptions));
-app.use(express.json());
-
-// ==========================================
-// 2. CLOUDINARY & MULTER CONFIG (Media Handling)
-// ==========================================
-// CTO FIX: Added safety checks to prevent crashes if Cloudinary keys are missing
-if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
-    console.warn("⚠️ WARNING: Cloudinary environment variables are missing. Image uploads will fail.");
-}
-
 cloudinary.config({ 
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME, 
   api_key: process.env.CLOUDINARY_API_KEY, 
@@ -64,6 +35,35 @@ const storage = new CloudinaryStorage({
 const upload = multer({ storage: storage }); 
 
 // ==========================================
+// 3. DATABASE CONNECTION (CTO BULLETPROOF FIX)
+// ==========================================
+let dbURI = process.env.dbURI || process.env.MONGO_URI; 
+
+// Auto-cleaner: Removes accidental spaces, double quotes ("") or single quotes ('') from the Render environment variable
+if (dbURI) {
+    dbURI = dbURI.trim().replace(/^["']|["']$/g, '');
+}
+
+// Safety Net: Exact error reporting
+if (!dbURI || (!dbURI.startsWith('mongodb://') && !dbURI.startsWith('mongodb+srv://'))) {
+    console.error('🚨 MONGODB CRASH PREVENTED: Invalid URL Scheme Detected!');
+    console.error(`👉 What Render is receiving: "${dbURI}"`);
+    console.error('👉 Please check Render Env Vars. Make sure it is exactly mongodb+srv://... without any extra text.');
+    process.exit(1); 
+}
+
+mongoose.connect(dbURI)
+  .then(() => {
+    console.log('✅ Successfully connected to MongoDB!');
+    app.listen(PORT, () => console.log(`🚀 Server is running on port ${PORT}`));
+  })
+  .catch(err => {
+      console.error('🚨 MONGODB CONNECTION FAILED:', err.message);
+      process.exit(1);
+  });
+
+// Slugify Function Helper
+const slugify = text => text.toString().toLowerCase().replace(/\s+/g, '-').replace(/[^\w\-]+/g, '').replace(/\-\-+/g, '-').replace(/^-+/, '').replace(/-+$/, '');
 // 3. ENTERPRISE-GRADE DATABASE CONNECTION
 // ==========================================
 // CTO FIX: Added fallbacks for environment variable naming conventions
