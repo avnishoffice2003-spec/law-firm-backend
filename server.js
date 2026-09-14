@@ -1,3 +1,4 @@
+require('dotenv').config(); // CTO FIX: Ensuring environment variables are loaded robustly
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -8,7 +9,7 @@ const cloudinary = require('cloudinary').v2;
 const marked = require('marked');
 
 // Models
-const Post = require('./post');
+const Post = require('./post'); // Assuming this is correct in your folder structure
 const Feedback = require('./models/feedback');
 const Job = require('./models/job'); 
 
@@ -16,21 +17,22 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // ==========================================
-// 1. CORS CONFIGURATION (Testimonial Fix Included)
+// 1. CORS CONFIGURATION (LWS Premium Security)
 // ==========================================
 const whitelist = [
     'https://peppy-klepon-999ed1.netlify.app',      
     'https://www.lawwheelsservices.co.in',          
     'https://lawwheelsservices.co.in',
-    'http://127.0.0.1:5500' // LOCAL SERVER FIX: Allows local testing without CORS block
+    'http://127.0.0.1:5500' // LOCAL SERVER FIX: Allows local testing
 ];
 
 const corsOptions = {
     origin: function (origin, callback) {
+        // Allow requests with no origin (like mobile apps or curl requests)
         if (whitelist.indexOf(origin) !== -1 || !origin) {
             callback(null, true);
         } else {
-            callback(new Error('Not allowed by CORS'));
+            callback(new Error('Not allowed by LWS CORS Policy'));
         }
     }
 };
@@ -39,8 +41,13 @@ app.use(cors(corsOptions));
 app.use(express.json());
 
 // ==========================================
-// 2. CLOUDINARY & MULTER CONFIG
+// 2. CLOUDINARY & MULTER CONFIG (Media Handling)
 // ==========================================
+// CTO FIX: Added safety checks to prevent crashes if Cloudinary keys are missing
+if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
+    console.warn("⚠️ WARNING: Cloudinary environment variables are missing. Image uploads will fail.");
+}
+
 cloudinary.config({ 
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME, 
   api_key: process.env.CLOUDINARY_API_KEY, 
@@ -57,32 +64,47 @@ const storage = new CloudinaryStorage({
 const upload = multer({ storage: storage }); 
 
 // ==========================================
-// 3. DATABASE CONNECTION
+// 3. ENTERPRISE-GRADE DATABASE CONNECTION
 // ==========================================
-const dbURI = process.env.dbURI; 
+// CTO FIX: Added fallbacks for environment variable naming conventions
+const dbURI = process.env.MONGO_URI || process.env.DB_URI || process.env.dbURI; 
+
+if (!dbURI) {
+    console.error('🚨 FATAL ERROR: Database URI is not defined in environment variables.');
+    console.error('👉 Please check Render Environment Variables and ensure MONGO_URI or dbURI is set.');
+    process.exit(1); // Kills the process immediately so Render knows it failed to start, rather than hanging.
+}
 
 mongoose.connect(dbURI)
   .then(() => {
-    console.log('Successfully connected to MongoDB!');
-    app.listen(PORT, () => console.log(`Server is running on port ${PORT}`));
+    console.log('✅ Successfully connected to LWS MongoDB Cluster!');
+    app.listen(PORT, () => console.log(`🚀 LWS Premium Backend is actively running on port ${PORT}`));
   })
-  .catch(err => console.log(err));
+  .catch(err => {
+      console.error('🚨 MONGODB CONNECTION FAILED:');
+      console.error(err.message);
+      process.exit(1);
+  });
 
-// Slugify Function Helper
-const slugify = text => text.toString().toLowerCase().replace(/\s+/g, '-').replace(/[^\w\-]+/g, '').replace(/\-\-+/g, '-').replace(/^-+/, '').replace(/-+$/, '');
+// Slugify Function Helper (Optimized)
+const slugify = text => text.toString().toLowerCase()
+    .replace(/\s+/g, '-')       // Replace spaces with -
+    .replace(/[^\w\-]+/g, '')   // Remove all non-word chars
+    .replace(/\-\-+/g, '-')     // Replace multiple - with single -
+    .replace(/^-+/, '')         // Trim - from start of text
+    .replace(/-+$/, '');        // Trim - from end of text
 
 
 // ==========================================
-// 4. BLOG ROUTES (Crash Fix Included)
+// 4. BLOG ROUTES
 // ==========================================
 
 // GET all posts
 app.get('/posts', (req, res) => {
     Post.find()
-        // CTO FIX: Removed .select('-content') so the frontend can generate previews without crashing
         .sort({ createdAt: -1 })
         .then(posts => res.json(posts))
-        .catch(err => res.status(400).json({ error: err.message }));
+        .catch(err => res.status(500).json({ error: 'Server Error', details: err.message }));
 });
 
 // GET posts by category
@@ -90,10 +112,9 @@ app.get('/posts/category/:name', (req, res) => {
   const categoryName = decodeURIComponent(req.params.name).replace(/-/g, ' ');
   
   Post.find({ category: { $regex: new RegExp(`^${categoryName}$`, "i") } })
-    // CTO FIX: Removed .select('-content') here as well
     .sort({ createdAt: -1 })
     .then(posts => res.json(posts))
-    .catch(err => res.status(400).json({ error: err.message }));
+    .catch(err => res.status(500).json({ error: 'Server Error', details: err.message }));
 });
 
 // GET a single post by slug
@@ -107,7 +128,7 @@ app.get('/posts/:slug', (req, res) => {
         res.status(404).json({ error: 'Post not found' });
       }
     })
-    .catch(err => res.status(400).json({ error: err.message }));
+    .catch(err => res.status(500).json({ error: 'Server Error', details: err.message }));
 });
 
 // POST a new blog post
@@ -128,17 +149,16 @@ app.post('/add-post', upload.single('image'), async (req, res) => {
     if (err.code === 11000) {
         return res.status(409).json({ message: 'A post with this title already exists. Kindly update the title.' });
     }
-    res.status(400).json({ error: 'Error saving post', details: err });
+    res.status(400).json({ error: 'Error saving post', details: err.message });
   }
 });
 
 // DELETE a blog post
 app.delete('/posts/:id', (req, res) => {
     Post.findByIdAndDelete(req.params.id)
-        .then(() => res.json({ message: 'Post deleted.' }))
+        .then(() => res.json({ message: 'Post deleted successfully.' }))
         .catch(err => res.status(400).json({ error: err.message }));
 });
-
 
 // ==========================================
 // 5. FEEDBACK / TESTIMONIAL ROUTES
@@ -155,7 +175,7 @@ app.post('/add-feedback', async (req, res) => {
             isApproved: false 
         });
         await newFeedback.save();
-        res.json({ message: 'Feedback submitted successfully.' });
+        res.status(201).json({ message: 'Feedback submitted successfully. Pending admin approval.' });
     } catch (err) {
         res.status(400).json({ error: 'Failed to submit feedback.', details: err.message });
     }
@@ -164,27 +184,26 @@ app.post('/add-feedback', async (req, res) => {
 app.get('/testimonials', (req, res) => {
     Feedback.find({ isApproved: true }).sort({ createdAt: -1 })
         .then(feedback => res.json(feedback))
-        .catch(err => res.status(400).json({ error: 'Could not fetch testimonials.' }));
+        .catch(err => res.status(500).json({ error: 'Could not fetch testimonials.' }));
 });
 
 app.get('/feedback/pending', (req, res) => {
     Feedback.find({ isApproved: false }).sort({ createdAt: -1 })
         .then(feedback => res.json(feedback))
-        .catch(err => res.status(400).json({ error: 'Could not fetch pending feedback.' }));
+        .catch(err => res.status(500).json({ error: 'Could not fetch pending feedback.' }));
 });
 
 app.put('/feedback/approve/:id', (req, res) => {
-    Feedback.findByIdAndUpdate(req.params.id, { isApproved: true })
-        .then(() => res.json({ message: 'Feedback approved.' }))
+    Feedback.findByIdAndUpdate(req.params.id, { isApproved: true }, { new: true })
+        .then(() => res.json({ message: 'Feedback approved and is now live.' }))
         .catch(err => res.status(400).json({ error: 'Could not approve feedback.' }));
 });
 
 app.delete('/feedback/:id', (req, res) => {
     Feedback.findByIdAndDelete(req.params.id)
-        .then(() => res.json({ message: 'Feedback deleted.' }))
+        .then(() => res.json({ message: 'Feedback deleted successfully.' }))
         .catch(err => res.status(400).json({ error: 'Could not delete feedback.' }));
 });
-
 
 // ==========================================
 // 6. CAREERS / JOB PORTAL ROUTES
@@ -194,7 +213,7 @@ app.delete('/feedback/:id', (req, res) => {
 app.get('/jobs', (req, res) => {
     Job.find({ isActive: true }).sort({ createdAt: -1 })
         .then(jobs => res.json(jobs))
-        .catch(err => res.status(400).json({ error: err.message }));
+        .catch(err => res.status(500).json({ error: 'Failed to fetch active jobs', details: err.message }));
 });
 
 // PUBLIC: Get a single job by slug
@@ -208,14 +227,14 @@ app.get('/jobs/:slug', (req, res) => {
                 res.status(404).json({ error: 'Job not found or has been closed.' });
             }
         })
-        .catch(err => res.status(400).json({ error: err.message }));
+        .catch(err => res.status(500).json({ error: 'Server error', details: err.message }));
 });
 
 // ADMIN: Get ALL jobs (including closed ones for admin panel)
 app.get('/admin/jobs', (req, res) => {
     Job.find().sort({ createdAt: -1 })
         .then(jobs => res.json(jobs))
-        .catch(err => res.status(400).json({ error: err.message }));
+        .catch(err => res.status(500).json({ error: 'Failed to fetch admin jobs', details: err.message }));
 });
 
 // ADMIN: Add a new job
@@ -235,7 +254,7 @@ app.post('/add-job', async (req, res) => {
             isActive: true
         });
         const savedJob = await newJob.save();
-        res.json(savedJob);
+        res.status(201).json(savedJob);
     } catch (err) {
         res.status(400).json({ error: 'Error saving job post.', details: err.message });
     }
@@ -249,15 +268,20 @@ app.put('/jobs/toggle/:id', async (req, res) => {
         
         job.isActive = !job.isActive;
         await job.save();
-        res.json({ message: `Job is now ${job.isActive ? 'Active' : 'Closed'}` });
+        res.json({ message: `Job vacancy is now ${job.isActive ? 'Active' : 'Closed'}` });
     } catch (err) {
-        res.status(400).json({ error: 'Error updating job status.' });
+        res.status(400).json({ error: 'Error updating job status.', details: err.message });
     }
 });
 
 // ADMIN: Delete a job
 app.delete('/jobs/:id', (req, res) => {
     Job.findByIdAndDelete(req.params.id)
-        .then(() => res.json({ message: 'Job vacancy deleted.' }))
+        .then(() => res.json({ message: 'Job vacancy deleted successfully.' }))
         .catch(err => res.status(400).json({ error: 'Could not delete job.' }));
+});
+
+// Catch-all for undefined routes
+app.use((req, res) => {
+    res.status(404).json({ error: 'LWS API Route not found.' });
 });
