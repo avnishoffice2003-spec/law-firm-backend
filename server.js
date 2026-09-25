@@ -6,6 +6,8 @@ const path = require('path');
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
 const cloudinary = require('cloudinary').v2;
 const marked = require('marked');
+const NodeCache = require('node-cache'); 
+const rateLimit = require('express-rate-limit'); 
 
 // Models
 const Post = require('./post'); 
@@ -16,7 +18,24 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // ==========================================
-// 1. CORS & SECURITY CONFIGURATION
+// 1. PERFORMANCE CACHE & SECURITY LIMITERS
+// ==========================================
+const cache = new NodeCache({ stdTTL: 600 }); // 10 minutes memory cache
+
+const apiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100, 
+    message: { error: 'Too many requests from this IP, please try again later.' }
+});
+
+const formLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000, // 1 hour
+    max: 20, 
+    message: { error: 'Too many submissions, please try again after an hour.' }
+});
+
+// ==========================================
+// 2. CORS & SECURITY CONFIGURATION
 // ==========================================
 const whitelist = [
     'https://peppy-klepon-999ed1.netlify.app',      
@@ -39,7 +58,6 @@ app.use(cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// CTO AI/SEO Fix: Setting basic security headers for faster browser rendering
 app.use((req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'SAMEORIGIN');
@@ -48,7 +66,7 @@ app.use((req, res, next) => {
 });
 
 // ==========================================
-// 2. CLOUDINARY & MULTER CONFIG
+// 3. CLOUDINARY & MULTER CONFIG
 // ==========================================
 cloudinary.config({ 
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME, 
@@ -61,30 +79,22 @@ const storage = new CloudinaryStorage({
   params: {
     folder: 'law-firm-blog',
     allowed_formats: ['jpg', 'jpeg', 'png', 'webp'],
-    // CTO FIX: Cloudinary AI Auto-Compression & Resizing added below
-    // width: 1200 is optimal for Open Graph (LinkedIn/Twitter/WhatsApp) previews.
-    // quality: 'auto' applies AI compression reducing size by up to 80%.
     transformation: [{ width: 1200, crop: 'limit', quality: 'auto', fetch_format: 'auto' }]
   }
 });
 const upload = multer({ storage: storage }); 
 
 // ==========================================
-// 3. DATABASE CONNECTION (CLEANED & FIXED)
+// 4. DATABASE CONNECTION
 // ==========================================
-// Fetching variable seamlessly whether it's named MONGO_URI, DB_URI, or dbURI
 let dbURI = process.env.MONGO_URI || process.env.DB_URI || process.env.dbURI; 
 
-// Auto-cleaner: Removes any hidden spaces or quotes around the URL 
 if (dbURI) {
     dbURI = dbURI.trim().replace(/^["']|["']$/g, '');
 }
 
-// Safety check before connection
 if (!dbURI || (!dbURI.startsWith('mongodb://') && !dbURI.startsWith('mongodb+srv://'))) {
     console.error('🚨 MONGODB CRASH PREVENTED: Invalid URL Scheme Detected!');
-    console.error(`👉 What Render is receiving: "${dbURI}"`);
-    console.error('👉 Please check Render Env Vars. Make sure it is exactly mongodb+srv://... without any extra text.');
     process.exit(1); 
 }
 
@@ -98,69 +108,94 @@ mongoose.connect(dbURI)
       process.exit(1);
   });
 
-// Slugify Function Helper
 const slugify = text => text.toString().toLowerCase().replace(/\s+/g, '-').replace(/[^\w\-]+/g, '').replace(/\-\-+/g, '-').replace(/^-+/, '').replace(/-+$/, '');
-
-// Helper to strip HTML tags for SEO text generation
 const stripHtml = (html) => html.replace(/<[^>]*>?/gm, '').trim();
 
 // ==========================================
-// 🌟 CTO EXCLUSIVE: SMART SHARE PROXY (FOR WHATSAPP/LINKEDIN BOT PREVIEWS) 🌟
+// 🌟 5. UPGRADED: SMART SHARE PROXY (SEO & BOT OPTIMIZED) 🌟
 // ==========================================
-// HOW IT WORKS: You share this link: backend-url/share/slug
-// WhatsApp reads the meta tags from here. Real humans get redirected to the frontend instantly.
-app.get('/share/:slug', async (req, res) => {
+app.get('/share/:slug', apiLimiter, async (req, res) => {
     try {
-        const post = await Post.findOne({ slug: req.params.slug });
-        if (!post) return res.status(404).send('Post not found');
+        const cacheKey = `share_meta_${req.params.slug}`;
+        let metaHtml = cache.get(cacheKey);
 
-        // Parse markdown to HTML, then strip to plain text for the description
-        const htmlContent = marked.parse(post.content);
-        let plainTextDesc = stripHtml(htmlContent).substring(0, 155).replace(/\s+/g, ' ').trim();
-        if(plainTextDesc.length >= 155) plainTextDesc += "...";
+        const frontendUrl = `https://www.lawwheelsservices.co.in/post-detail.html?slug=${req.params.slug}`;
+        const isBot = /bot|whatsapp|facebook|twitter|linkedin|skype|slack|telegram|google|bing/i.test(req.headers['user-agent'] || '');
 
-        const frontendUrl = `https://www.lawwheelsservices.co.in/post-detail.html?slug=${post.slug}`;
-        const imageUrl = post.imageUrl || "https://www.lawwheelsservices.co.in/lwslogo.png";
-        const siteTitle = `${post.title} | LAW WHEELS SERVICES LLP`;
+        // Human Users: Instant HTTP 301 Redirect to Frontend (No ugly JS loading screens)
+        if (!isBot) {
+            return res.redirect(301, frontendUrl);
+        }
 
-        // We send back a lightweight, invisible HTML file purely for Bots
-        const metaHtml = `
-        <!DOCTYPE html>
-        <html lang="en">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>${siteTitle}</title>
-            <meta name="description" content="${plainTextDesc}">
-            
-            <!-- Open Graph tags for WhatsApp, Facebook, LinkedIn -->
-            <meta property="og:title" content="${siteTitle}">
-            <meta property="og:description" content="${plainTextDesc}">
-            <meta property="og:image" content="${imageUrl}">
-            <meta property="og:image:width" content="1200">
-            <meta property="og:image:height" content="630">
-            <meta property="og:url" content="${frontendUrl}">
-            <meta property="og:type" content="article">
-            
-            <!-- Twitter Card data -->
-            <meta name="twitter:card" content="summary_large_image">
-            <meta name="twitter:title" content="${siteTitle}">
-            <meta name="twitter:description" content="${plainTextDesc}">
-            <meta name="twitter:image" content="${imageUrl}">
+        // Bot Traffic: Serve SEO optimized HTML if not in cache
+        if (!metaHtml) {
+            const post = await Post.findOne({ slug: req.params.slug });
+            if (!post) return res.status(404).send('Post not found');
 
-            <!-- INSTANT REDIRECT FOR HUMAN USERS -->
-            <meta http-equiv="refresh" content="0;url=${frontendUrl}">
-            <script>
-                // Fallback JS Redirect
-                window.location.replace("${frontendUrl}");
-            </script>
-        </head>
-        <body style="background: #0f172a; color: #fff; font-family: sans-serif; text-align: center; padding-top: 50px;">
-            <h2>Redirecting you to the premium legal insight...</h2>
-            <p>If you are not redirected automatically, <a href="${frontendUrl}" style="color: #d4af37;">click here</a>.</p>
-        </body>
-        </html>
-        `;
+            const htmlContent = marked.parse(post.content);
+            let plainTextDesc = stripHtml(htmlContent).substring(0, 155).replace(/\s+/g, ' ').trim();
+            if(plainTextDesc.length >= 155) plainTextDesc += "...";
+
+            const imageUrl = post.imageUrl || "https://www.lawwheelsservices.co.in/lwslogo.png";
+            const siteTitle = `${post.title} | Law Wheels Services LLP`;
+            const publishDate = post.createdAt ? new Date(post.createdAt).toISOString() : new Date().toISOString();
+            const authorName = post.author || "Avnish Sharma";
+
+            metaHtml = `
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <meta charset="UTF-8">
+                <title>${siteTitle}</title>
+                <meta name="description" content="${plainTextDesc}">
+                
+                <!-- SEO Fix: Strict Canonical Tag -->
+                <link rel="canonical" href="${frontendUrl}" />
+                
+                <!-- Open Graph tags for WhatsApp, LinkedIn, Facebook -->
+                <meta property="og:title" content="${siteTitle}">
+                <meta property="og:description" content="${plainTextDesc}">
+                <meta property="og:image" content="${imageUrl}">
+                <meta property="og:image:secure_url" content="${imageUrl}">
+                <meta property="og:image:width" content="1200">
+                <meta property="og:image:height" content="630">
+                <meta property="og:url" content="${frontendUrl}">
+                <meta property="og:type" content="article">
+                <meta property="og:site_name" content="Law Wheels Services LLP">
+                
+                <!-- Twitter Card data -->
+                <meta name="twitter:card" content="summary_large_image">
+                <meta name="twitter:title" content="${siteTitle}">
+                <meta name="twitter:description" content="${plainTextDesc}">
+                <meta name="twitter:image" content="${imageUrl}">
+
+                <!-- Advanced JSON-LD Schema for Google Rich Snippets -->
+                <script type="application/ld+json">
+                {
+                  "@context": "https://schema.org",
+                  "@type": "Article",
+                  "headline": "${siteTitle}",
+                  "image": "${imageUrl}",
+                  "author": { "@type": "Person", "name": "${authorName}" },
+                  "publisher": {
+                    "@type": "Organization",
+                    "name": "Law Wheels Services LLP",
+                    "logo": { "@type": "ImageObject", "url": "https://www.lawwheelsservices.co.in/lwslogo.png" }
+                  },
+                  "datePublished": "${publishDate}",
+                  "description": "${plainTextDesc}"
+                }
+                </script>
+            </head>
+            <body>
+                <h1>${siteTitle}</h1>
+                <img src="${imageUrl}" alt="${siteTitle}" />
+                <p>${plainTextDesc}</p>
+            </body>
+            </html>
+            `;
+            cache.set(cacheKey, metaHtml);
+        }
 
         res.set('Content-Type', 'text/html');
         res.send(metaHtml);
@@ -171,85 +206,100 @@ app.get('/share/:slug', async (req, res) => {
 });
 
 // ==========================================
-// 4. BLOG ROUTES
+// 6. BLOG ROUTES (CACHED)
 // ==========================================
-
-// GET all posts
-app.get('/posts', (req, res) => {
-    Post.find()
-        .sort({ createdAt: -1 })
-        .then(posts => res.json(posts))
-        .catch(err => res.status(500).json({ error: 'Server Error', details: err.message }));
-});
-
-// GET posts by category
-app.get('/posts/category/:name', (req, res) => {
-  const categoryName = decodeURIComponent(req.params.name).replace(/-/g, ' ');
-  
-  Post.find({ category: { $regex: new RegExp(`^${categoryName}$`, "i") } })
-    .sort({ createdAt: -1 })
-    .then(posts => res.json(posts))
-    .catch(err => res.status(500).json({ error: 'Server Error', details: err.message }));
-});
-
-// GET a single post by slug (UPGRADED for AI/SEO)
-app.get('/posts/:slug', (req, res) => {
-  Post.findOne({ slug: req.params.slug })
-    .then(post => {
-      if (post) {
-        const parsedHtml = marked.parse(post.content);
-        
-        // CTO Engine: Pre-calculate SEO summary on the server for faster frontend rendering
-        let aiSummary = stripHtml(parsedHtml).substring(0, 160).replace(/\s+/g, ' ').trim();
-        if(aiSummary.length >= 160) aiSummary += "...";
-
-        const processedPost = { 
-            ...post.toObject(), 
-            content: parsedHtml,
-            seoSummary: aiSummary // Explicit field for frontend AI Schema injection
-        };
-        res.json(processedPost);
-      } else {
-        res.status(404).json({ error: 'Post not found' });
-      }
-    })
-    .catch(err => res.status(500).json({ error: 'Server Error', details: err.message }));
-});
-
-// POST a new blog post
-app.post('/add-post', upload.single('image'), async (req, res) => {
-  try {
-    const postSlug = `${slugify(req.body.title)}-${Date.now()}`;
-    const newPost = new Post({
-      title: req.body.title, 
-      slug: postSlug, 
-      content: req.body.content, 
-      author: req.body.author, 
-      category: req.body.category,
-      imageUrl: req.file ? req.file.path : null 
-    });
-    const savedPost = await newPost.save();
-    res.json(savedPost);
-  } catch (err) {
-    if (err.code === 11000) {
-        return res.status(409).json({ message: 'A post with this title already exists. Kindly update the title.' });
+app.get('/posts', apiLimiter, async (req, res) => {
+    try {
+        const cacheKey = 'all_posts';
+        let posts = cache.get(cacheKey);
+        if (!posts) {
+            posts = await Post.find().sort({ createdAt: -1 });
+            cache.set(cacheKey, posts);
+        }
+        res.json(posts);
+    } catch (err) {
+        res.status(500).json({ error: 'Server Error', details: err.message });
     }
-    res.status(400).json({ error: 'Error saving post', details: err.message });
-  }
 });
 
-// DELETE a blog post
-app.delete('/posts/:id', (req, res) => {
-    Post.findByIdAndDelete(req.params.id)
-        .then(() => res.json({ message: 'Post deleted successfully.' }))
-        .catch(err => res.status(400).json({ error: err.message }));
+app.get('/posts/category/:name', apiLimiter, async (req, res) => {
+    try {
+        const categoryName = decodeURIComponent(req.params.name).replace(/-/g, ' ');
+        const cacheKey = `posts_cat_${categoryName}`;
+        let posts = cache.get(cacheKey);
+        
+        if (!posts) {
+            posts = await Post.find({ category: { $regex: new RegExp(`^${categoryName}$`, "i") } }).sort({ createdAt: -1 });
+            cache.set(cacheKey, posts);
+        }
+        res.json(posts);
+    } catch (err) {
+        res.status(500).json({ error: 'Server Error', details: err.message });
+    }
+});
+
+app.get('/posts/:slug', apiLimiter, async (req, res) => {
+    try {
+        const cacheKey = `post_${req.params.slug}`;
+        let processedPost = cache.get(cacheKey);
+
+        if (!processedPost) {
+            const post = await Post.findOne({ slug: req.params.slug });
+            if (post) {
+                const parsedHtml = marked.parse(post.content);
+                let aiSummary = stripHtml(parsedHtml).substring(0, 160).replace(/\s+/g, ' ').trim();
+                if(aiSummary.length >= 160) aiSummary += "...";
+
+                processedPost = { 
+                    ...post.toObject(), 
+                    content: parsedHtml,
+                    seoSummary: aiSummary 
+                };
+                cache.set(cacheKey, processedPost);
+            } else {
+                return res.status(404).json({ error: 'Post not found' });
+            }
+        }
+        res.json(processedPost);
+    } catch (err) {
+        res.status(500).json({ error: 'Server Error', details: err.message });
+    }
+});
+
+app.post('/add-post', formLimiter, upload.single('image'), async (req, res) => {
+    try {
+        const postSlug = `${slugify(req.body.title)}-${Date.now()}`;
+        const newPost = new Post({
+            title: req.body.title, 
+            slug: postSlug, 
+            content: req.body.content, 
+            author: req.body.author, 
+            category: req.body.category,
+            imageUrl: req.file ? req.file.path : null 
+        });
+        const savedPost = await newPost.save();
+        cache.flushAll(); // Clear cache when new post is added
+        res.json(savedPost);
+    } catch (err) {
+        if (err.code === 11000) return res.status(409).json({ message: 'Title already exists.' });
+        res.status(400).json({ error: 'Error saving post', details: err.message });
+    }
+});
+
+app.delete('/posts/:id', formLimiter, async (req, res) => {
+    try {
+        await Post.findByIdAndDelete(req.params.id);
+        cache.flushAll();
+        res.json({ message: 'Post deleted successfully.' });
+    } catch (err) {
+        res.status(400).json({ error: err.message });
+    }
 });
 
 // ==========================================
-// 5. FEEDBACK / TESTIMONIAL ROUTES
+// 7. FEEDBACK / TESTIMONIAL ROUTES
 // ==========================================
-
-app.post('/add-feedback', async (req, res) => {
+app.post('/add-feedback', formLimiter, async (req, res) => {
     try {
         const newFeedback = new Feedback({
             clientName: req.body.clientName,
@@ -260,113 +310,136 @@ app.post('/add-feedback', async (req, res) => {
             isApproved: false 
         });
         await newFeedback.save();
-        res.status(201).json({ message: 'Feedback submitted successfully. Pending admin approval.' });
+        cache.flushAll();
+        res.status(201).json({ message: 'Feedback submitted.' });
     } catch (err) {
-        res.status(400).json({ error: 'Failed to submit feedback.', details: err.message });
+        res.status(400).json({ error: 'Failed to submit.', details: err.message });
     }
 });
 
-app.get('/testimonials', (req, res) => {
-    Feedback.find({ isApproved: true }).sort({ createdAt: -1 })
-        .then(feedback => res.json(feedback))
-        .catch(err => res.status(500).json({ error: 'Could not fetch testimonials.' }));
+app.get('/testimonials', apiLimiter, async (req, res) => {
+    try {
+        const cacheKey = 'approved_testimonials';
+        let testimonials = cache.get(cacheKey);
+        if(!testimonials) {
+            testimonials = await Feedback.find({ isApproved: true }).sort({ createdAt: -1 });
+            cache.set(cacheKey, testimonials);
+        }
+        res.json(testimonials);
+    } catch (err) {
+        res.status(500).json({ error: 'Error fetching testimonials.' });
+    }
 });
 
-app.get('/feedback/pending', (req, res) => {
-    Feedback.find({ isApproved: false }).sort({ createdAt: -1 })
-        .then(feedback => res.json(feedback))
-        .catch(err => res.status(500).json({ error: 'Could not fetch pending feedback.' }));
+app.get('/feedback/pending', apiLimiter, async (req, res) => {
+    try {
+        const pending = await Feedback.find({ isApproved: false }).sort({ createdAt: -1 });
+        res.json(pending);
+    } catch (err) {
+        res.status(500).json({ error: 'Error fetching pending feedback.' });
+    }
 });
 
-app.put('/feedback/approve/:id', (req, res) => {
-    Feedback.findByIdAndUpdate(req.params.id, { isApproved: true }, { new: true })
-        .then(() => res.json({ message: 'Feedback approved and is now live.' }))
-        .catch(err => res.status(400).json({ error: 'Could not approve feedback.' }));
+app.put('/feedback/approve/:id', formLimiter, async (req, res) => {
+    try {
+        await Feedback.findByIdAndUpdate(req.params.id, { isApproved: true }, { new: true });
+        cache.flushAll();
+        res.json({ message: 'Feedback approved.' });
+    } catch (err) {
+        res.status(400).json({ error: 'Error approving feedback.' });
+    }
 });
 
-app.delete('/feedback/:id', (req, res) => {
-    Feedback.findByIdAndDelete(req.params.id)
-        .then(() => res.json({ message: 'Feedback deleted successfully.' }))
-        .catch(err => res.status(400).json({ error: 'Could not delete feedback.' }));
+app.delete('/feedback/:id', formLimiter, async (req, res) => {
+    try {
+        await Feedback.findByIdAndDelete(req.params.id);
+        cache.flushAll();
+        res.json({ message: 'Feedback deleted.' });
+    } catch (err) {
+        res.status(400).json({ error: 'Error deleting feedback.' });
+    }
 });
 
 // ==========================================
-// 6. CAREERS / JOB PORTAL ROUTES
+// 8. CAREERS / JOB PORTAL ROUTES
 // ==========================================
-
-// PUBLIC: Get all ACTIVE job postings
-app.get('/jobs', (req, res) => {
-    Job.find({ isActive: true }).sort({ createdAt: -1 })
-        .then(jobs => res.json(jobs))
-        .catch(err => res.status(500).json({ error: 'Failed to fetch active jobs', details: err.message }));
+app.get('/jobs', apiLimiter, async (req, res) => {
+    try {
+        const cacheKey = 'active_jobs';
+        let jobs = cache.get(cacheKey);
+        if(!jobs) {
+            jobs = await Job.find({ isActive: true }).sort({ createdAt: -1 });
+            cache.set(cacheKey, jobs);
+        }
+        res.json(jobs);
+    } catch (err) {
+        res.status(500).json({ error: 'Error fetching jobs' });
+    }
 });
 
-// PUBLIC: Get a single job by slug
-app.get('/jobs/:slug', (req, res) => {
-    Job.findOne({ slug: req.params.slug, isActive: true })
-        .then(job => {
-            if (job) {
-                const processedJob = { ...job.toObject(), description: marked.parse(job.description) };
-                res.json(processedJob);
+app.get('/jobs/:slug', apiLimiter, async (req, res) => {
+    try {
+        const cacheKey = `job_${req.params.slug}`;
+        let jobObj = cache.get(cacheKey);
+        if(!jobObj) {
+            const job = await Job.findOne({ slug: req.params.slug, isActive: true });
+            if(job) {
+                jobObj = { ...job.toObject(), description: marked.parse(job.description) };
+                cache.set(cacheKey, jobObj);
             } else {
-                res.status(404).json({ error: 'Job not found or has been closed.' });
+                return res.status(404).json({ error: 'Job not found.' });
             }
-        })
-        .catch(err => res.status(500).json({ error: 'Server error', details: err.message }));
+        }
+        res.json(jobObj);
+    } catch (err) {
+        res.status(500).json({ error: 'Server error' });
+    }
 });
 
-// ADMIN: Get ALL jobs (including closed ones for admin panel)
-app.get('/admin/jobs', (req, res) => {
-    Job.find().sort({ createdAt: -1 })
-        .then(jobs => res.json(jobs))
-        .catch(err => res.status(500).json({ error: 'Failed to fetch admin jobs', details: err.message }));
+app.get('/admin/jobs', apiLimiter, async (req, res) => {
+    try {
+        const jobs = await Job.find().sort({ createdAt: -1 });
+        res.json(jobs);
+    } catch (err) {
+        res.status(500).json({ error: 'Error fetching jobs' });
+    }
 });
 
-// ADMIN: Add a new job
-app.post('/add-job', async (req, res) => {
+app.post('/add-job', formLimiter, async (req, res) => {
     try {
         const jobSlug = `${slugify(req.body.title)}-${Date.now()}`;
-        const newJob = new Job({
-            title: req.body.title,
-            slug: jobSlug,
-            department: req.body.department,
-            location: req.body.location,
-            employmentType: req.body.employmentType,
-            experienceLevel: req.body.experienceLevel,
-            description: req.body.description,
-            requirements: req.body.requirements,
-            salaryRange: req.body.salaryRange,
-            isActive: true
-        });
+        const newJob = new Job({ ...req.body, slug: jobSlug, isActive: true });
         const savedJob = await newJob.save();
+        cache.flushAll();
         res.status(201).json(savedJob);
     } catch (err) {
         res.status(400).json({ error: 'Error saving job post.', details: err.message });
     }
 });
 
-// ADMIN: Toggle Job Status (Open/Close a vacancy)
-app.put('/jobs/toggle/:id', async (req, res) => {
+app.put('/jobs/toggle/:id', formLimiter, async (req, res) => {
     try {
         const job = await Job.findById(req.params.id);
         if(!job) return res.status(404).json({ error: 'Job not found' });
-        
         job.isActive = !job.isActive;
         await job.save();
-        res.json({ message: `Job vacancy is now ${job.isActive ? 'Active' : 'Closed'}` });
+        cache.flushAll();
+        res.json({ message: `Job is now ${job.isActive ? 'Active' : 'Closed'}` });
     } catch (err) {
-        res.status(400).json({ error: 'Error updating job status.', details: err.message });
+        res.status(400).json({ error: 'Error updating job status.' });
     }
 });
 
-// ADMIN: Delete a job
-app.delete('/jobs/:id', (req, res) => {
-    Job.findByIdAndDelete(req.params.id)
-        .then(() => res.json({ message: 'Job vacancy deleted successfully.' }))
-        .catch(err => res.status(400).json({ error: 'Could not delete job.' }));
+app.delete('/jobs/:id', formLimiter, async (req, res) => {
+    try {
+        await Job.findByIdAndDelete(req.params.id);
+        cache.flushAll();
+        res.json({ message: 'Job deleted successfully.' });
+    } catch (err) {
+        res.status(400).json({ error: 'Could not delete job.' });
+    }
 });
 
-// Catch-all for undefined routes
 app.use((req, res) => {
     res.status(404).json({ error: 'LWS API Route not found.' });
 });
