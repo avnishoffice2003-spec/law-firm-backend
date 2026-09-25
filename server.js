@@ -16,7 +16,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // ==========================================
-// 1. CORS CONFIGURATION
+// 1. CORS & SECURITY CONFIGURATION
 // ==========================================
 const whitelist = [
     'https://peppy-klepon-999ed1.netlify.app',      
@@ -37,6 +37,15 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// CTO AI/SEO Fix: Setting basic security headers for faster browser rendering
+app.use((req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+    res.setHeader('X-XSS-Protection', '1; mode=block');
+    next();
+});
 
 // ==========================================
 // 2. CLOUDINARY & MULTER CONFIG
@@ -51,12 +60,11 @@ const storage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: {
     folder: 'law-firm-blog',
-    allowed_formats: ['jpg', 'jpeg', 'png'],
+    allowed_formats: ['jpg', 'jpeg', 'png', 'webp'],
     // CTO FIX: Cloudinary AI Auto-Compression & Resizing added below
-    // width: 1000 prevents unnecessarily huge resolutions.
-    // quality: 'auto' applies AI compression reducing size by up to 80% with no visible quality loss.
-    // fetch_format: 'auto' converts heavy PNGs/JPGs into modern lightweight formats like WebP.
-    transformation: [{ width: 1000, crop: 'limit', quality: 'auto', fetch_format: 'auto' }]
+    // width: 1200 is optimal for Open Graph (LinkedIn/Twitter/WhatsApp) previews.
+    // quality: 'auto' applies AI compression reducing size by up to 80%.
+    transformation: [{ width: 1200, crop: 'limit', quality: 'auto', fetch_format: 'auto' }]
   }
 });
 const upload = multer({ storage: storage }); 
@@ -93,6 +101,75 @@ mongoose.connect(dbURI)
 // Slugify Function Helper
 const slugify = text => text.toString().toLowerCase().replace(/\s+/g, '-').replace(/[^\w\-]+/g, '').replace(/\-\-+/g, '-').replace(/^-+/, '').replace(/-+$/, '');
 
+// Helper to strip HTML tags for SEO text generation
+const stripHtml = (html) => html.replace(/<[^>]*>?/gm, '').trim();
+
+// ==========================================
+// 🌟 CTO EXCLUSIVE: SMART SHARE PROXY (FOR WHATSAPP/LINKEDIN BOT PREVIEWS) 🌟
+// ==========================================
+// HOW IT WORKS: You share this link: backend-url/share/slug
+// WhatsApp reads the meta tags from here. Real humans get redirected to the frontend instantly.
+app.get('/share/:slug', async (req, res) => {
+    try {
+        const post = await Post.findOne({ slug: req.params.slug });
+        if (!post) return res.status(404).send('Post not found');
+
+        // Parse markdown to HTML, then strip to plain text for the description
+        const htmlContent = marked.parse(post.content);
+        let plainTextDesc = stripHtml(htmlContent).substring(0, 155).replace(/\s+/g, ' ').trim();
+        if(plainTextDesc.length >= 155) plainTextDesc += "...";
+
+        const frontendUrl = `https://www.lawwheelsservices.co.in/post-detail.html?slug=${post.slug}`;
+        const imageUrl = post.imageUrl || "https://www.lawwheelsservices.co.in/lwslogo.png";
+        const siteTitle = `${post.title} | LAW WHEELS SERVICES LLP`;
+
+        // We send back a lightweight, invisible HTML file purely for Bots
+        const metaHtml = `
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>${siteTitle}</title>
+            <meta name="description" content="${plainTextDesc}">
+            
+            <!-- Open Graph tags for WhatsApp, Facebook, LinkedIn -->
+            <meta property="og:title" content="${siteTitle}">
+            <meta property="og:description" content="${plainTextDesc}">
+            <meta property="og:image" content="${imageUrl}">
+            <meta property="og:image:width" content="1200">
+            <meta property="og:image:height" content="630">
+            <meta property="og:url" content="${frontendUrl}">
+            <meta property="og:type" content="article">
+            
+            <!-- Twitter Card data -->
+            <meta name="twitter:card" content="summary_large_image">
+            <meta name="twitter:title" content="${siteTitle}">
+            <meta name="twitter:description" content="${plainTextDesc}">
+            <meta name="twitter:image" content="${imageUrl}">
+
+            <!-- INSTANT REDIRECT FOR HUMAN USERS -->
+            <meta http-equiv="refresh" content="0;url=${frontendUrl}">
+            <script>
+                // Fallback JS Redirect
+                window.location.replace("${frontendUrl}");
+            </script>
+        </head>
+        <body style="background: #0f172a; color: #fff; font-family: sans-serif; text-align: center; padding-top: 50px;">
+            <h2>Redirecting you to the premium legal insight...</h2>
+            <p>If you are not redirected automatically, <a href="${frontendUrl}" style="color: #d4af37;">click here</a>.</p>
+        </body>
+        </html>
+        `;
+
+        res.set('Content-Type', 'text/html');
+        res.send(metaHtml);
+    } catch (err) {
+        console.error("Proxy Share Error:", err);
+        res.status(500).send('Server Error generating preview.');
+    }
+});
+
 // ==========================================
 // 4. BLOG ROUTES
 // ==========================================
@@ -115,12 +192,22 @@ app.get('/posts/category/:name', (req, res) => {
     .catch(err => res.status(500).json({ error: 'Server Error', details: err.message }));
 });
 
-// GET a single post by slug
+// GET a single post by slug (UPGRADED for AI/SEO)
 app.get('/posts/:slug', (req, res) => {
   Post.findOne({ slug: req.params.slug })
     .then(post => {
       if (post) {
-        const processedPost = { ...post.toObject(), content: marked.parse(post.content) };
+        const parsedHtml = marked.parse(post.content);
+        
+        // CTO Engine: Pre-calculate SEO summary on the server for faster frontend rendering
+        let aiSummary = stripHtml(parsedHtml).substring(0, 160).replace(/\s+/g, ' ').trim();
+        if(aiSummary.length >= 160) aiSummary += "...";
+
+        const processedPost = { 
+            ...post.toObject(), 
+            content: parsedHtml,
+            seoSummary: aiSummary // Explicit field for frontend AI Schema injection
+        };
         res.json(processedPost);
       } else {
         res.status(404).json({ error: 'Post not found' });
