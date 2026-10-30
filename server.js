@@ -17,13 +17,13 @@ const Job = require('./models/job');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Configuration for your live domain (Used for Sitemap and Canonical tags)
+// Configuration for your live domain
 const SITE_URL = 'https://www.lawwheelsservices.co.in';
 
 // ==========================================
 // 1. PERFORMANCE CACHE & SECURITY LIMITERS
 // ==========================================
-const cache = new NodeCache({ stdTTL: 600 }); // 10 minutes memory cache
+const cache = new NodeCache({ stdTTL: 600 }); 
 
 const apiLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
@@ -114,7 +114,6 @@ mongoose.connect(dbURI)
 const slugify = text => text.toString().toLowerCase().replace(/\s+/g, '-').replace(/[^\w\-]+/g, '').replace(/\-\-+/g, '-').replace(/^-+/, '').replace(/-+$/, '');
 const stripHtml = (html) => html.replace(/<[^>]*>?/gm, '').trim();
 
-
 // ==========================================
 // 🌟 5. DYNAMIC XML SITEMAP (SEO OPTIMIZATION) 🌟
 // ==========================================
@@ -125,8 +124,19 @@ app.get('/sitemap.xml', apiLimiter, async (req, res) => {
         let xml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
         xml += `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n`;
         
-        // Static Pages
-        const staticPages = ['', '/about.html', '/services.html', '/blog.html', '/contact.html'];
+        // 🚀 SEO FIX: Added ALL missing static pages to the array
+        const staticPages = [
+            '', 
+            '/about.html', 
+            '/services.html', 
+            '/blog.html', 
+            '/contact.html',
+            '/store.html',
+            '/useful-links.html',
+            '/testimonials.html',
+            '/careers.html'
+        ];
+        
         staticPages.forEach(page => {
             xml += `  <url>\n    <loc>${SITE_URL}${page}</loc>\n    <changefreq>weekly</changefreq>\n    <priority>0.8</priority>\n  </url>\n`;
         });
@@ -149,12 +159,9 @@ app.get('/sitemap.xml', apiLimiter, async (req, res) => {
     }
 });
 
-
 // ==========================================
 // 🌟 6. FULL SSR BLOG ROUTING (SEO/GEO FIX) 🌟
 // ==========================================
-// CTO Note: This fully replaces the old /share/:slug proxy. It serves the complete HTML 
-// for humans and bots natively, resolving blank page indexing.
 app.get('/blog/:slug', apiLimiter, async (req, res) => {
     try {
         const cacheKey = `ssr_blog_${req.params.slug}`;
@@ -271,7 +278,6 @@ app.get('/blog/:slug', apiLimiter, async (req, res) => {
 app.get('/share/:slug', (req, res) => {
     res.redirect(301, `/blog/${req.params.slug}`);
 });
-
 
 // ==========================================
 // 7. EXISTING BLOG API ROUTES (UNCHANGED)
