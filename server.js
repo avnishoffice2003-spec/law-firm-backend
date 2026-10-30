@@ -17,19 +17,22 @@ const Job = require('./models/job');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Configuration for your live domain (Used for Sitemap and Canonical tags)
+const SITE_URL = 'https://www.lawwheelsservices.co.in';
+
 // ==========================================
 // 1. PERFORMANCE CACHE & SECURITY LIMITERS
 // ==========================================
 const cache = new NodeCache({ stdTTL: 600 }); // 10 minutes memory cache
 
 const apiLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
+    windowMs: 15 * 60 * 1000,
     max: 100, 
     message: { error: 'Too many requests from this IP, please try again later.' }
 });
 
 const formLimiter = rateLimit({
-    windowMs: 60 * 60 * 1000, // 1 hour
+    windowMs: 60 * 60 * 1000,
     max: 20, 
     message: { error: 'Too many submissions, please try again after an hour.' }
 });
@@ -111,102 +114,167 @@ mongoose.connect(dbURI)
 const slugify = text => text.toString().toLowerCase().replace(/\s+/g, '-').replace(/[^\w\-]+/g, '').replace(/\-\-+/g, '-').replace(/^-+/, '').replace(/-+$/, '');
 const stripHtml = (html) => html.replace(/<[^>]*>?/gm, '').trim();
 
+
 // ==========================================
-// 🌟 5. UPGRADED: SMART SHARE PROXY (SEO & BOT OPTIMIZED) 🌟
+// 🌟 5. DYNAMIC XML SITEMAP (SEO OPTIMIZATION) 🌟
 // ==========================================
-app.get('/share/:slug', apiLimiter, async (req, res) => {
+app.get('/sitemap.xml', apiLimiter, async (req, res) => {
     try {
-        const cacheKey = `share_meta_${req.params.slug}`;
-        let metaHtml = cache.get(cacheKey);
+        const posts = await Post.find().select('slug createdAt').sort({ createdAt: -1 });
+        
+        let xml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
+        xml += `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n`;
+        
+        // Static Pages
+        const staticPages = ['', '/about.html', '/services.html', '/blog.html', '/contact.html'];
+        staticPages.forEach(page => {
+            xml += `  <url>\n    <loc>${SITE_URL}${page}</loc>\n    <changefreq>weekly</changefreq>\n    <priority>0.8</priority>\n  </url>\n`;
+        });
 
-        const frontendUrl = `https://www.lawwheelsservices.co.in/post-detail.html?slug=${req.params.slug}`;
-        const isBot = /bot|whatsapp|facebook|twitter|linkedin|skype|slack|telegram|google|bing/i.test(req.headers['user-agent'] || '');
-
-        // Human Users: Instant HTTP 301 Redirect to Frontend (No ugly JS loading screens)
-        if (!isBot) {
-            return res.redirect(301, frontendUrl);
-        }
-
-        // Bot Traffic: Serve SEO optimized HTML if not in cache
-        if (!metaHtml) {
-            const post = await Post.findOne({ slug: req.params.slug });
-            if (!post) return res.status(404).send('Post not found');
-
-            const htmlContent = marked.parse(post.content);
-            let plainTextDesc = stripHtml(htmlContent).substring(0, 155).replace(/\s+/g, ' ').trim();
-            if(plainTextDesc.length >= 155) plainTextDesc += "...";
-
-            const imageUrl = post.imageUrl || "https://www.lawwheelsservices.co.in/lwslogo.png";
-            const siteTitle = `${post.title} | Law Wheels Services LLP`;
-            const publishDate = post.createdAt ? new Date(post.createdAt).toISOString() : new Date().toISOString();
-            const authorName = post.author || "Avnish Sharma";
-
-            metaHtml = `
-            <!DOCTYPE html>
-            <html lang="en">
-            <head>
-                <meta charset="UTF-8">
-                <title>${siteTitle}</title>
-                <meta name="description" content="${plainTextDesc}">
-                
-                <!-- SEO Fix: Strict Canonical Tag -->
-                <link rel="canonical" href="${frontendUrl}" />
-                
-                <!-- Open Graph tags for WhatsApp, LinkedIn, Facebook -->
-                <meta property="og:title" content="${siteTitle}">
-                <meta property="og:description" content="${plainTextDesc}">
-                <meta property="og:image" content="${imageUrl}">
-                <meta property="og:image:secure_url" content="${imageUrl}">
-                <meta property="og:image:width" content="1200">
-                <meta property="og:image:height" content="630">
-                <meta property="og:url" content="${frontendUrl}">
-                <meta property="og:type" content="article">
-                <meta property="og:site_name" content="Law Wheels Services LLP">
-                
-                <!-- Twitter Card data -->
-                <meta name="twitter:card" content="summary_large_image">
-                <meta name="twitter:title" content="${siteTitle}">
-                <meta name="twitter:description" content="${plainTextDesc}">
-                <meta name="twitter:image" content="${imageUrl}">
-
-                <!-- Advanced JSON-LD Schema for Google Rich Snippets -->
-                <script type="application/ld+json">
-                {
-                  "@context": "https://schema.org",
-                  "@type": "Article",
-                  "headline": "${siteTitle}",
-                  "image": "${imageUrl}",
-                  "author": { "@type": "Person", "name": "${authorName}" },
-                  "publisher": {
-                    "@type": "Organization",
-                    "name": "Law Wheels Services LLP",
-                    "logo": { "@type": "ImageObject", "url": "https://www.lawwheelsservices.co.in/lwslogo.png" }
-                  },
-                  "datePublished": "${publishDate}",
-                  "description": "${plainTextDesc}"
-                }
-                </script>
-            </head>
-            <body>
-                <h1>${siteTitle}</h1>
-                <img src="${imageUrl}" alt="${siteTitle}" />
-                <p>${plainTextDesc}</p>
-            </body>
-            </html>
-            `;
-            cache.set(cacheKey, metaHtml);
-        }
-
-        res.set('Content-Type', 'text/html');
-        res.send(metaHtml);
-    } catch (err) {
-        console.error("Proxy Share Error:", err);
-        res.status(500).send('Server Error generating preview.');
+        // Dynamic Blog Routes
+        posts.forEach(post => {
+            if (post.slug) {
+                const date = post.createdAt ? new Date(post.createdAt).toISOString() : new Date().toISOString();
+                xml += `  <url>\n    <loc>${SITE_URL}/blog/${post.slug}</loc>\n    <lastmod>${date}</lastmod>\n    <changefreq>monthly</changefreq>\n    <priority>0.9</priority>\n  </url>\n`;
+            }
+        });
+        
+        xml += `</urlset>`;
+        
+        res.header('Content-Type', 'application/xml');
+        res.status(200).send(xml);
+    } catch (error) {
+        console.error('Sitemap generation error:', error);
+        res.status(500).end();
     }
 });
 
+
 // ==========================================
-// 6. BLOG ROUTES (CACHED)
+// 🌟 6. FULL SSR BLOG ROUTING (SEO/GEO FIX) 🌟
+// ==========================================
+// CTO Note: This fully replaces the old /share/:slug proxy. It serves the complete HTML 
+// for humans and bots natively, resolving blank page indexing.
+app.get('/blog/:slug', apiLimiter, async (req, res) => {
+    try {
+        const cacheKey = `ssr_blog_${req.params.slug}`;
+        let htmlTemplate = cache.get(cacheKey);
+
+        if (!htmlTemplate) {
+            const post = await Post.findOne({ slug: req.params.slug });
+            
+            if (!post) {
+                return res.status(404).send('<h1 style="text-align:center; margin-top:50px;">404 - Premium insight not found</h1>');
+            }
+
+            const parsedContent = marked.parse(post.content);
+            const plainTextDesc = stripHtml(parsedContent).substring(0, 155).replace(/\s+/g, ' ').trim() + "...";
+            const imageUrl = post.imageUrl || `${SITE_URL}/lwslogo.png`;
+            const fullTitle = `${post.title} | Law Wheels Services LLP`;
+            const cleanCanonicalUrl = `${SITE_URL}/blog/${post.slug}`;
+            const publishDate = post.createdAt ? new Date(post.createdAt).toISOString() : new Date().toISOString();
+            const displayDate = post.createdAt ? new Date(post.createdAt).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) : 'Recently Published';
+
+            // Schema.org for Rich Snippets
+            const schema = {
+                "@context": "https://schema.org",
+                "@type": "LegalArticle",
+                "mainEntityOfPage": { "@type": "WebPage", "@id": cleanCanonicalUrl },
+                "headline": post.title,
+                "image": [imageUrl],
+                "datePublished": publishDate,
+                "author": { "@type": "Person", "name": post.author || "Avnish Sharma", "jobTitle": "Founder & Managing Partner" },
+                "publisher": { "@type": "Organization", "name": "Law Wheels Services LLP", "logo": { "@type": "ImageObject", "url": `${SITE_URL}/lwslogo.png` } },
+                "description": plainTextDesc
+            };
+
+            // Generating the complete SSR HTML payload
+            htmlTemplate = `<!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>${fullTitle}</title>
+                <meta name="description" content="${plainTextDesc}">
+                <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
+                <link rel="canonical" href="${cleanCanonicalUrl}">
+                
+                <meta property="og:title" content="${fullTitle}">
+                <meta property="og:description" content="${plainTextDesc}">
+                <meta property="og:image" content="${imageUrl}">
+                <meta property="og:url" content="${cleanCanonicalUrl}">
+                <meta property="og:type" content="article">
+                <meta property="og:site_name" content="Law Wheels Services LLP">
+                
+                <meta name="twitter:card" content="summary_large_image">
+                <meta name="twitter:title" content="${fullTitle}">
+                <meta name="twitter:description" content="${plainTextDesc}">
+                <meta name="twitter:image" content="${imageUrl}">
+            
+                <script type="application/ld+json">${JSON.stringify(schema)}</script>
+            
+                <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+                <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+                <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;700&family=Montserrat:wght@400;600;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+                
+                <style>
+                    body, html { background-color: #ffffff !important; margin: 0; padding: 0; min-height: 100vh; }
+                    body { font-family: 'Inter', system-ui, sans-serif; color: #1e293b; background-attachment: fixed; }
+                    body::before { content: ""; position: fixed; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle at center, rgba(99, 102, 241, 0.08) 0%, rgba(236, 72, 153, 0.05) 30%, rgba(59, 130, 246, 0.08) 60%, rgba(255, 255, 255, 0) 80%); filter: blur(80px); animation: aurora-move 20s infinite alternate linear; z-index: -2; pointer-events: none; }
+                    @keyframes aurora-move { 0% { transform: translate(0, 0) rotate(0deg); } 100% { transform: translate(-10%, -10%) rotate(10deg); } }
+                    .post-hero { padding: 40px 20px 20px 20px; position: relative; z-index: 2; text-align: center; }
+                    .premium-post-vault { background: #ffffff; border: 1px solid rgba(212, 175, 55, 0.4); border-radius: 24px; padding: 60px; box-shadow: 0 30px 60px rgba(0,0,0,0.08); margin: 0 auto; max-width: 900px; }
+                    .post-full-content p { font-size: 1.15rem; line-height: 1.8; color: #334155; margin-bottom: 25px; font-family: 'Lora', serif; }
+                    .post-full-content h3, .post-full-content h4 { color: #1e3a8a; font-family: 'Montserrat', sans-serif; font-weight: 700; margin-top: 40px; margin-bottom: 20px; font-size: 1.6rem; }
+                    .btn-gold-back { background: linear-gradient(135deg, #d4af37 0%, #fde047 100%); color: #0f172a; padding: 14px 30px; border-radius: 12px; font-weight: 800; text-transform: uppercase; text-decoration: none; display: inline-flex; transition: 0.3s; font-family: 'Montserrat', sans-serif; }
+                    .btn-gold-back:hover { transform: translateY(-3px); box-shadow: 0 15px 30px rgba(212, 175, 55, 0.5); color: #000; }
+                </style>
+            </head>
+            <body>
+                <header class="post-hero">
+                    <a href="${SITE_URL}" style="text-decoration: none; font-size: 1.5rem; font-weight: 800; color: #0f172a; font-family: 'Montserrat', sans-serif;">
+                        LAW WHEELS SERVICES LLP
+                    </a>
+                </header>
+                <main class="container my-5" style="position: relative; z-index: 2;">
+                    <div class="premium-post-vault">
+                        <article>
+                            ${post.imageUrl ? `<img src="${post.imageUrl}" class="img-fluid rounded mb-4" alt="${post.title}" style="max-height:450px; width:100%; object-fit:cover;">` : ''}
+                            <h1 style="color: #0f172a; font-weight: 800; font-size: 2.5rem; margin-bottom: 1rem; font-family: 'Montserrat', sans-serif;">${post.title}</h1>
+                            <div style="background: rgba(212, 175, 55, 0.1); border-radius: 50px; padding: 6px 18px; color: #b48600; font-weight: 700; font-size: 0.85rem; display: inline-block; margin-bottom: 30px;">
+                                By ${post.author || 'Avnish Sharma'} | Published on ${displayDate}
+                            </div>
+                            <div class="post-full-content">
+                                ${parsedContent}
+                            </div>
+                        </article>
+                    </div>
+                    <div class="text-center mt-5">
+                        <a href="${SITE_URL}/blog.html" class="btn-gold-back"><i class="fas fa-arrow-left me-2"></i> Return to Blog</a>
+                    </div>
+                </main>
+            </body>
+            </html>`;
+            
+            cache.set(cacheKey, htmlTemplate);
+        }
+
+        res.set('Content-Type', 'text/html');
+        res.send(htmlTemplate);
+    } catch (err) {
+        console.error("SSR Blog Error:", err);
+        res.status(500).send('<h1 style="text-align:center;">Server Error generating page.</h1>');
+    }
+});
+
+// Backward compatibility redirect for old share links
+app.get('/share/:slug', (req, res) => {
+    res.redirect(301, `/blog/${req.params.slug}`);
+});
+
+
+// ==========================================
+// 7. EXISTING BLOG API ROUTES (UNCHANGED)
 // ==========================================
 app.get('/posts', apiLimiter, async (req, res) => {
     try {
@@ -297,7 +365,7 @@ app.delete('/posts/:id', formLimiter, async (req, res) => {
 });
 
 // ==========================================
-// 7. FEEDBACK / TESTIMONIAL ROUTES
+// 8. EXISTING FEEDBACK / TESTIMONIAL ROUTES (UNCHANGED)
 // ==========================================
 app.post('/add-feedback', formLimiter, async (req, res) => {
     try {
@@ -361,7 +429,7 @@ app.delete('/feedback/:id', formLimiter, async (req, res) => {
 });
 
 // ==========================================
-// 8. CAREERS / JOB PORTAL ROUTES
+// 9. EXISTING CAREERS / JOB PORTAL ROUTES (UNCHANGED)
 // ==========================================
 app.get('/jobs', apiLimiter, async (req, res) => {
     try {
